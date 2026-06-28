@@ -43,7 +43,6 @@ main :: proc() {
 	}
 	defer os.close(d)
 
-	// fix 1 + fix 2: read_dir and file_info_slice_delete require an explicit allocator
 	entries, read_err := os.read_dir(d, -1, context.allocator)
 	if read_err != os.ERROR_NONE {
 		fmt.eprintf("Cannot read directory '%s': %v\n", dir_path, read_err)
@@ -58,39 +57,38 @@ main :: proc() {
 	renamed, skipped := 0, 0
 
 	for entry in entries {
-		// File_Info has no is_dir — the new os API exposes File_Type enum instead
 		if entry.type == .Directory do continue
 
-		name := entry.name
-		if !strings.has_prefix(name, PREFIX) do continue
+		// trim_prefix returns the original string unchanged if prefix is absent,
+		// so a single call both checks and strips.
+		new_name := strings.trim_prefix(entry.name, PREFIX)
+		if new_name == entry.name do continue
 
-		new_name := name[len(PREFIX):]
-		if len(new_name) == 0 {
-			fmt.eprintf("Skipped '%s': name would be empty after stripping prefix\n", name)
+		if new_name == "" {
+			fmt.eprintf("Skipped '%s': name would be empty after removing prefix\n", entry.name)
 			skipped += 1
 			continue
 		}
 
 		if dry_run {
-			fmt.printf("  '%s'  →  '%s'\n", name, new_name)
+			fmt.printf("  '%s'  →  '%s'\n", entry.name, new_name)
 			renamed += 1
 			continue
 		}
 
-		// fix 4: filepath.join returns (string, Allocator_Error)
-		old_path, _ := filepath.join({dir_path, name})
-		new_path, _ := filepath.join({dir_path, new_name})
+		// temp_allocator for short-lived path strings; freed at the end of each iteration.
+		old_path, _ := filepath.join({dir_path, entry.name}, context.temp_allocator)
+		new_path, _ := filepath.join({dir_path, new_name}, context.temp_allocator)
 
 		if err := os.rename(old_path, new_path); err != os.ERROR_NONE {
-			fmt.eprintf("Error: '%s' → '%s': %v\n", name, new_name, err)
+			fmt.eprintf("Error: '%s' → '%s': %v\n", entry.name, new_name, err)
 			skipped += 1
 		} else {
-			fmt.printf("OK  '%s'  →  '%s'\n", name, new_name)
+			fmt.printf("OK  '%s'  →  '%s'\n", entry.name, new_name)
 			renamed += 1
 		}
 
-		delete(old_path)
-		delete(new_path)
+		free_all(context.temp_allocator)
 	}
 
 	fmt.println()
