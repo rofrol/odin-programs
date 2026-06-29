@@ -13,6 +13,11 @@ usage :: proc() {
 }
 
 main :: proc() {
+	if PREFIX == "" {
+		fmt.eprintln("Error: PREFIX empty")
+		os.exit(1)
+	}
+
 	args := os.args[1:]
 
 	if len(args) == 0 {
@@ -23,8 +28,7 @@ main :: proc() {
 	dry_run := false
 	dir_path := ""
 
-	switch {
-	case args[0] == "-n":
+	if args[0] == "-n" {
 		if len(args) < 2 {
 			fmt.eprintln("Error: missing directory path after -n flag")
 			usage()
@@ -32,19 +36,19 @@ main :: proc() {
 		}
 		dry_run = true
 		dir_path = args[1]
-	case:
+	} else {
 		dir_path = args[0]
 	}
 
 	d, open_err := os.open(dir_path)
-	if open_err != os.ERROR_NONE {
+	if open_err != nil {
 		fmt.eprintf("Cannot open directory '%s': %v\n", dir_path, open_err)
 		os.exit(1)
 	}
 	defer os.close(d)
 
 	entries, read_err := os.read_dir(d, -1, context.allocator)
-	if read_err != os.ERROR_NONE {
+	if read_err != nil {
 		fmt.eprintf("Cannot read directory '%s': %v\n", dir_path, read_err)
 		os.exit(1)
 	}
@@ -56,16 +60,20 @@ main :: proc() {
 
 	renamed, skipped := 0, 0
 
+	context.allocator = context.temp_allocator
 	for entry in entries {
 		if entry.type == .Directory do continue
 
-		// trim_prefix returns the original string unchanged if prefix is absent,
-		// so a single call both checks and strips.
-		new_name := strings.trim_prefix(entry.name, PREFIX)
-		if new_name == entry.name do continue
-
-		if new_name == "" {
+		if entry.name == PREFIX {
 			fmt.eprintf("Skipped '%s': name would be empty after removing prefix\n", entry.name)
+			skipped += 1
+			continue
+		}
+
+		new_name := strings.trim_prefix(entry.name, PREFIX)
+		// there was no prefix in file name, so continue
+		if new_name == entry.name {
+			fmt.printf("Skipped: '%s' → '%s'\n", entry.name, new_name)
 			skipped += 1
 			continue
 		}
@@ -76,11 +84,10 @@ main :: proc() {
 			continue
 		}
 
-		// temp_allocator for short-lived path strings; freed at the end of each iteration.
-		old_path, _ := filepath.join({dir_path, entry.name}, context.temp_allocator)
-		new_path, _ := filepath.join({dir_path, new_name}, context.temp_allocator)
+		old_path, _ := filepath.join({dir_path, entry.name})
+		new_path, _ := filepath.join({dir_path, new_name})
 
-		if err := os.rename(old_path, new_path); err != os.ERROR_NONE {
+		if err := os.rename(old_path, new_path); err != nil {
 			fmt.eprintf("Error: '%s' → '%s': %v\n", entry.name, new_name, err)
 			skipped += 1
 		} else {
