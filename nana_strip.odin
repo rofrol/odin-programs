@@ -19,7 +19,7 @@ Options :: struct {
 
 main :: proc() {
 	opt: Options
-	flags.parse_or_exit(&opt, os.args, .Unix)
+	flags.parse_or_exit(&opt, os.args, .Odin)
 
 	d, open_err := os.open(opt.dir)
 	if open_err != nil {
